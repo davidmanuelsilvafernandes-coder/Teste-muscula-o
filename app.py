@@ -6,14 +6,12 @@ from supabase import create_client, Client
 
 st.set_page_config(layout="wide", page_title="Consultoria Pro", page_icon="📈")
 
-# Estilo CSS Personalizado
 st.markdown("""
     <style>
     .stButton>button { border-radius: 8px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# Ligar à BD
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
@@ -35,12 +33,9 @@ if 'user_email' not in st.session_state:
             if st.button("Entrar na Plataforma", use_container_width=True, type="primary"):
                 try:
                     auth_res = supabase.auth.sign_in_with_password({"email": email_login, "password": pass_login})
-                    
-                    # Verificar perfil na BD
                     perfil_res = supabase.table("perfis").select("*").eq("email", email_login).execute()
                     
                     if not perfil_res.data:
-                        # Criar perfil de segurança caso não exista
                         supabase.table("perfis").insert({"email": email_login, "role": "treinador", "nome": "Treinador"}).execute()
                         role = "treinador"
                     else:
@@ -59,20 +54,12 @@ if 'user_email' not in st.session_state:
             
             if st.button("Registar Nova Conta", use_container_width=True, type="primary"):
                 if not nome_reg or not email_reg or not pass_reg:
-                    st.warning("Por favor, preencha todos os campos.")
+                    st.warning("Preencha todos os campos.")
                 else:
                     try:
-                        # 1. Criar utilizador na Autenticação Supabase
-                        auth_res = supabase.auth.sign_up({"email": email_reg, "password": pass_reg})
-                        
-                        # 2. Registar o perfil correspondente na tabela 'perfis' como treinador
-                        supabase.table("perfis").insert({
-                            "email": email_reg, 
-                            "role": "treinador", 
-                            "nome": nome_reg
-                        }).execute()
-                        
-                        st.success("✅ Conta criada com sucesso! Já pode ir ao separador 'Iniciar Sessão' para entrar.")
+                        supabase.auth.sign_up({"email": email_reg, "password": pass_reg})
+                        supabase.table("perfis").insert({"email": email_reg, "role": "treinador", "nome": nome_reg}).execute()
+                        st.success("✅ Conta criada com sucesso! Vá ao separador 'Iniciar Sessão'.")
                     except Exception as e:
                         st.error(f"Erro ao registar: {e}")
                         
@@ -98,7 +85,6 @@ if role_atual == "treinador":
 
     if menu == "📊 Dashboard":
         st.title("Dashboard Geral de Consultoria")
-        
         clientes_res = supabase.table("perfis").select("*").eq("treinador_email", email_atual).execute()
         checkins_res = supabase.table("checkins").select("*").eq("visto_treinador", False).execute()
         
@@ -107,32 +93,17 @@ if role_atual == "treinador":
         col2.metric("Check-ins Pendentes", len(checkins_res.data) if checkins_res.data else 0)
         col3.metric("Novas Avaliações", "0")
         col4.metric("Planos Ativos", "0")
-        
-        st.subheader("Tarefas Prioritárias")
-        if checkins_res.data and len(checkins_res.data) > 0:
-            st.warning(f"Tem {len(checkins_res.data)} check-ins de clientes à espera de revisão.")
-        else:
-            st.success("Toda a consultoria está em dia! Bom trabalho.")
 
     elif menu == "👥 Gerir Clientes":
         st.title("Gestão de Clientes")
         tab_lista, tab_novo = st.tabs(["Lista de Clientes", "Adicionar Novo Cliente"])
         
         with tab_novo:
-            st.subheader("Registar novo atleta na plataforma")
             novo_email = st.text_input("Email do Cliente:")
             novo_nome = st.text_input("Nome Completo do Atleta:")
             if st.button("Criar Acesso ao Cliente"):
-                try:
-                    supabase.table("perfis").insert({
-                        "email": novo_email, 
-                        "role": "cliente", 
-                        "nome": novo_nome, 
-                        "treinador_email": email_atual
-                    }).execute()
-                    st.success(f"Cliente {novo_nome} adicionado com sucesso!")
-                except Exception as e:
-                    st.error(f"Erro ao adicionar cliente: {e}")
+                supabase.table("perfis").insert({"email": novo_email, "role": "cliente", "nome": novo_nome, "treinador_email": email_atual}).execute()
+                st.success(f"Cliente {novo_nome} adicionado com sucesso!")
 
         with tab_lista:
             clientes_res = supabase.table("perfis").select("*").eq("treinador_email", email_atual).execute()
@@ -140,50 +111,21 @@ if role_atual == "treinador":
             if not df_clientes.empty:
                 st.dataframe(df_clientes[['nome', 'email']], use_container_width=True, hide_index=True)
                 
-                st.subheader("Área de Consultoria Individual")
-                cliente_sel = st.selectbox("Selecione um cliente para intervir:", df_clientes['email'])
+                cliente_sel = st.selectbox("Selecionar Atleta para ver Histórico:", df_clientes['email'])
                 
-                c1, c2, c3 = st.columns(3)
-                c1.button("Ver Histórico de Treinos", use_container_width=True)
-                c2.button("Ajustar Nutrição", use_container_width=True)
+                # Ver os registos estilo Hevy enviados pelo atleta
+                st.subheader(f"Registo de Treinos de: {cliente_sel}")
+                registos_cli = supabase.table("registos_treino").select("*").eq("cliente_email", cliente_sel).execute()
+                df_reg = pd.DataFrame(registos_cli.data)
                 
-                if c3.button("Gerar Relatório de Evolução PDF", use_container_width=True, type="primary"):
-                    pdf = FPDF()
-                    pdf.add_page()
-                    pdf.set_font("helvetica", "B", 18)
-                    pdf.cell(0, 15, "Relatorio Oficial de Evolucao", ln=True, align="C")
-                    pdf.set_font("helvetica", "I", 12)
-                    pdf.cell(0, 10, f"Atleta: {cliente_sel} | Treinador: {email_atual}", ln=True, align="C")
-                    pdf.ln(10)
-                    
-                    pdf.set_font("helvetica", "B", 14)
-                    pdf.cell(0, 10, "A. Resumo Executivo", ln=True)
-                    pdf.set_font("helvetica", "", 12)
-                    pdf.multi_cell(0, 8, "Evolucao consistente ao longo do periodo avaliado. Bons indices de forca e adesao estavel.")
-                    
-                    st.download_button("Baixar Relatório PDF", data=bytes(pdf.output()), file_name=f"Relatorio_{cliente_sel}.pdf", mime="application/pdf")
-            else:
-                st.info("Ainda não tem clientes registados. Adicione o seu primeiro cliente no separador ao lado.")
+                if not df_reg.empty:
+                    st.dataframe(df_reg[['data_registo', 'exercicio', 'serie_num', 'peso', 'reps']], use_container_width=True, hide_index=True)
+                else:
+                    st.info("Este atleta ainda não registou treinos na plataforma.")
 
     elif menu == "🏋️‍♂️ Construtor de Planos":
         st.title("Construtor de Treino Prescrito")
-        st.write("Crie blocos de treino estruturados para os seus clientes.")
-        
-        clientes = pd.DataFrame(supabase.table("perfis").select("email").eq("treinador_email", email_atual).execute().data)
-        if not clientes.empty:
-            cli_plano = st.selectbox("Para quem é o plano?", clientes['email'])
-            nome_plano = st.text_input("Nome da Rotina (ex: Push/Pull/Legs)")
-            
-            c1, c2, c3, c4 = st.columns(4)
-            exercicio = c1.text_input("Exercício")
-            series = c2.number_input("Séries", min_value=1, value=3)
-            reps = c3.text_input("Reps")
-            rir = c4.text_input("RIR/RPE")
-            
-            if st.button("Guardar Bloco de Treino"):
-                st.success(f"Plano atribuído a {cli_plano} com sucesso!")
-        else:
-            st.info("Adicione clientes na aba de gestão antes de criar planos.")
+        st.info("Ferramenta de criação de blocos de treino.")
 
     elif menu == "📬 Analisar Check-ins":
         st.title("Acompanhamento Periódico")
@@ -193,42 +135,73 @@ if role_atual == "treinador":
         if not df_checks.empty:
             for index, row in df_checks.iterrows():
                 with st.expander(f"📩 Check-in de {row['cliente_email']} ({row['data_checkin']})"):
-                    st.write(f"**Peso:** {row['peso_atual']} kg")
-                    st.write(f"**Adesão:** {row['adesao_treino']}")
-                    st.write(f"**Qualidade do Sono:** {row['recuperacao_sono']}/10")
+                    st.write(f"**Peso:** {row['peso_atual']} kg | **Adesão:** {row['adesao_treino']}")
                     st.write(f"**Feedback:** {row['feedback_livre']}")
                     if st.button(f"Marcar como Analisado", key=f"btn_{row['id']}"):
                         supabase.table("checkins").update({"visto_treinador": True}).eq("id", row['id']).execute()
                         st.rerun()
         else:
-            st.info("Não há novos check-ins pendentes.")
+            st.info("Sem check-ins pendentes.")
             
     elif menu == "📚 Biblioteca Educativa":
-        st.title("Biblioteca de Recursos e Guias")
-        st.info("Espaço reservado para organizar os seus materiais pedagógicos, vídeos de execução e diretrizes de treino.")
+        st.title("Biblioteca de Recursos")
 
 # =====================================================================
-# ÁREA DO CLIENTE
+# ÁREA DO CLIENTE (ESTILO HEVY INTEGRADO)
 # =====================================================================
 elif role_atual == "cliente":
-    menu = st.sidebar.radio("O Meu Perfil:", ["📅 Treino de Hoje", "📝 Submeter Check-in"])
+    menu = st.sidebar.radio("O Meu Perfil:", ["🏋️‍♂️ Registar Treino (Hevy Mode)", "📝 Submeter Check-in"])
     
-    if menu == "📅 Treino de Hoje":
-        st.title("O Meu Plano de Treino")
-        st.info("Consulte aqui os exercícios prescritos pelo seu treinador e registe o seu progresso.")
+    if menu == "🏋️‍♂️ Registar Treino (Hevy Mode)":
+        st.title("Registo de Treino em Directo")
+        st.write("Registe os seus exercícios, cargas e repetições tal como numa aplicação de musculação.")
         
-        st.markdown("### Treino Ativo - Bloco A")
-        with st.container():
-            st.markdown("**(1) Supino Reto com Barra** - 3 Séries | 8-10 Reps | RIR 2")
-            c1, c2, c3 = st.columns(3)
-            c1.number_input("Carga (kg)", key="c1")
-            c2.number_input("Reps Feitas", key="r1")
-            c3.button("Concluir Série", key="b1")
+        with st.form("form_registo_treino", clear_on_submit=True):
+            data_hoje = str(datetime.now().date())
+            st.write(f"**Data da Sessão:** {data_hoje}")
+            
+            exercicio_nome = st.selectbox("Escolher Exercício:", ["Supino Reto com Barra", "Agachamento Livre", "Puxada Vertical", "Elevação Lateral", "Curl de Bíceps", "Tríceps Corda", "Leg Press"])
+            
+            col1, col2, col3 = st.columns(3)
+            serie_id = col1.number_input("Número da Série", min_value=1, max_value=10, value=1)
+            peso_kg = col2.number_input("Carga (kg)", min_value=0.0, max_value=300.0, step=2.5)
+            reps_feitas = col3.number_input("Repetições", min_value=0, max_value=100, value=10)
+            
+            if st.form_submit_button("💾 Registar Série", type="primary"):
+                supabase.table("registos_treino").insert({
+                    "cliente_email": email_atual,
+                    "exercicio": exercicio_nome,
+                    "serie_num": int(serie_id),
+                    "peso": float(peso_kg),
+                    "reps": int(reps_feitas),
+                    "data_registo": data_hoje
+                }).execute()
+                st.success(f"Série guardada com sucesso: {exercicio_nome} - {peso_kg}kg x {reps_feitas} reps!")
+                
+        # Mostrar o histórico recente do próprio atleta na sessão
+        st.subheader("📜 Os seus registos recentes")
+        meus_registos = supabase.table("registos_treino").select("*").eq("cliente_email", email_atual).execute()
+        df_meus = pd.DataFrame(meus_registos.data)
+        if not df_meus.empty:
+            st.dataframe(df_meus[['data_registo', 'exercicio', 'serie_num', 'peso', 'reps']], use_container_width=True, hide_index=True)
+        else:
+            st.info("Ainda não registou nenhum exercício hoje.")
             
     elif menu == "📝 Submeter Check-in":
-        st.title("Check-in de Acompanhamento Periódico")
-        st.write("Partilhe os seus dados da semana para o treinador avaliar a evolução.")
-        
+        st.title("Check-in de Acompanhamento")
         with st.form("form_checkin"):
             peso = st.number_input("Peso Atual (kg)", min_value=30.0, max_value=200.0, value=75.0)
-            ades
+            adesao = st.select_slider("Adesão ao plano:", options=["Muito Má", "Razoável", "Boa", "Perfeita"])
+            sono = st.slider("Qualidade do Sono (0-10)", 0, 10, 7)
+            feedback = st.text_area("Comentários / Dificuldades:")
+            
+            if st.form_submit_button("Enviar Check-in", type="primary"):
+                supabase.table("checkins").insert({
+                    "cliente_email": email_atual,
+                    "data_checkin": str(datetime.now().date()),
+                    "peso_atual": peso,
+                    "adesao_treino": adesao,
+                    "recuperacao_sono": sono,
+                    "feedback_livre": feedback
+                }).execute()
+                st.success("Check-in enviado com sucesso!")
