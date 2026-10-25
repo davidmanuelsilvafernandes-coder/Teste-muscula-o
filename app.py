@@ -1,41 +1,49 @@
 import streamlit as st
 import pandas as pd
 
-st.title("Dashboard de Força e Hipertrofia")
+st.title("Dashboard de Força e Hipertrofia B2B")
+st.write("Ferramenta de análise de desempenho para Personal Trainers.")
 
-# 1. Carregar os dados
-df = pd.read_csv('hevy_export.csv')
+# 1. Botão para o utilizador carregar o seu próprio ficheiro CSV
+ficheiro_carregado = st.file_uploader("Carregue o ficheiro de exportação do Hevy (.csv)", type=["csv"])
 
-# 2. Calcular a 1RM para todos os treinos de uma vez
-df['1RM_Estimada'] = df['weight_kg'] * (1 + (df['reps'] / 30))
-
-# 3. Obter a lista de todos os exercícios que existem no seu ficheiro
-# Removemos os vazios e ordenamos alfabeticamente
-exercicios_disponiveis = df['exercise_title'].dropna().unique()
-exercicios_disponiveis.sort()
-
-# 4. Criar o menu interativo na página
-# Definimos o Chest Press como padrão se existir, senão escolhe o primeiro da lista
-index_padrao = list(exercicios_disponiveis).index('Chest Press (Machine)') if 'Chest Press (Machine)' in exercicios_disponiveis else 0
-
-exercicio_selecionado = st.selectbox(
-    "Escolha o exercício que pretende analisar:", 
-    options=exercicios_disponiveis,
-    index=index_padrao
-)
-
-st.write(f"Evolução da 1RM: **{exercicio_selecionado}**")
-
-# 5. Filtrar os dados com base na escolha do utilizador
-df_filtrado = df[df['exercise_title'] == exercicio_selecionado].copy()
-
-# 6. Limpar datas e desenhar o gráfico
-if not df_filtrado.empty:
-    df_filtrado['Date'] = pd.to_datetime(df_filtrado['start_time'], format='%d %b %Y, %H:%M', errors='coerce')
-    df_filtrado['Date'] = df_filtrado['Date'].dt.date
+if ficheiro_carregado is not None:
+    # Ler os dados do ficheiro que foi carregado na página
+    df = pd.read_csv(ficheiro_carregado)
     
-    progresso_diario = df_filtrado.groupby('Date')['1RM_Estimada'].max().reset_index()
+    # 2. Calcular as duas métricas principais
+    df['1RM_Estimada'] = df['weight_kg'] * (1 + (df['reps'] / 30)) # Força
+    df['Volume_Serie'] = df['weight_kg'] * df['reps']              # Hipertrofia
     
-    st.line_chart(data=progresso_diario, x='Date', y='1RM_Estimada')
+    # 3. Criar o menu interativo com os exercícios encontrados no ficheiro
+    exercicios_disponiveis = df['exercise_title'].dropna().unique()
+    exercicios_disponiveis.sort()
+    
+    index_padrao = list(exercicios_disponiveis).index('Chest Press (Machine)') if 'Chest Press (Machine)' in exercicios_disponiveis else 0
+    
+    exercicio_selecionado = st.selectbox(
+        "Selecione o exercício a analisar:", 
+        options=exercicios_disponiveis,
+        index=index_padrao
+    )
+    
+    # 4. Filtrar e formatar as datas
+    df_filtrado = df[df['exercise_title'] == exercicio_selecionado].copy()
+    
+    if not df_filtrado.empty:
+        df_filtrado['Date'] = pd.to_datetime(df_filtrado['start_time'], format='%d %b %Y, %H:%M', errors='coerce').dt.date
+        
+        # --- GRÁFICO 1: FORÇA PURA ---
+        st.subheader(f"Evolução da 1RM: {exercicio_selecionado}")
+        progresso_forca = df_filtrado.groupby('Date')['1RM_Estimada'].max().reset_index()
+        st.line_chart(data=progresso_forca, x='Date', y='1RM_Estimada')
+        
+        # --- GRÁFICO 2: HIPERTROFIA (Volume) ---
+        st.subheader("Volume Total de Carga (Kg x Reps)")
+        progresso_volume = df_filtrado.groupby('Date')['Volume_Serie'].sum().reset_index()
+        st.bar_chart(data=progresso_volume, x='Date', y='Volume_Serie')
+        
+    else:
+        st.warning("Não há dados suficientes para desenhar os gráficos deste exercício.")
 else:
-    st.warning("Não há dados suficientes para desenhar o gráfico deste exercício.")
+    st.info("👆 Por favor, faça o upload de um ficheiro CSV do Hevy para começar.")
