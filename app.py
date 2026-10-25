@@ -1,49 +1,73 @@
 import streamlit as st
 import pandas as pd
 
-st.title("Dashboard de Força e Hipertrofia B2B")
-st.write("Ferramenta de análise de desempenho para Personal Trainers.")
+# Configuração da página para formato panorâmico
+st.set_page_config(layout="wide", page_title="Dashboard B2B")
 
-# 1. Botão para o utilizador carregar o seu próprio ficheiro CSV
-ficheiro_carregado = st.file_uploader("Carregue o ficheiro de exportação do Hevy (.csv)", type=["csv"])
+st.title("Dashboard de Desempenho B2B")
+
+# 1. BARRA LATERAL (Sidebar)
+with st.sidebar:
+    st.header("⚙️ Configurações")
+    ficheiro_carregado = st.file_uploader("Upload CSV (Hevy)", type=["csv"])
 
 if ficheiro_carregado is not None:
-    # Ler os dados do ficheiro que foi carregado na página
     df = pd.read_csv(ficheiro_carregado)
     
-    # 2. Calcular as duas métricas principais
-    df['1RM_Estimada'] = df['weight_kg'] * (1 + (df['reps'] / 30)) # Força
-    df['Volume_Serie'] = df['weight_kg'] * df['reps']              # Hipertrofia
+    # Cálculos Base
+    df['1RM_Estimada'] = df['weight_kg'] * (1 + (df['reps'] / 30))
+    df['Volume_Serie'] = df['weight_kg'] * df['reps']
     
-    # 3. Criar o menu interativo com os exercícios encontrados no ficheiro
-    exercicios_disponiveis = df['exercise_title'].dropna().unique()
-    exercicios_disponiveis.sort()
-    
-    index_padrao = list(exercicios_disponiveis).index('Chest Press (Machine)') if 'Chest Press (Machine)' in exercicios_disponiveis else 0
-    
-    exercicio_selecionado = st.selectbox(
-        "Selecione o exercício a analisar:", 
-        options=exercicios_disponiveis,
-        index=index_padrao
-    )
-    
-    # 4. Filtrar e formatar as datas
-    df_filtrado = df[df['exercise_title'] == exercicio_selecionado].copy()
-    
-    if not df_filtrado.empty:
-        df_filtrado['Date'] = pd.to_datetime(df_filtrado['start_time'], format='%d %b %Y, %H:%M', errors='coerce').dt.date
+    # Função para mapear músculos automaticamente pelas palavras no nome
+    def mapear_musculo(nome):
+        nome = str(nome).lower()
+        if any(x in nome for x in ['chest', 'pec', 'press', 'fly']): return 'Peito/Ombros'
+        if any(x in nome for x in ['squat', 'leg', 'deadlift']): return 'Pernas'
+        if any(x in nome for x in ['row', 'pull', 'lat']): return 'Costas'
+        if any(x in nome for x in ['curl', 'tricep', 'arm', 'extension', 'pushdown']): return 'Braços'
+        return 'Outros'
         
-        # --- GRÁFICO 1: FORÇA PURA ---
-        st.subheader(f"Evolução da 1RM: {exercicio_selecionado}")
-        progresso_forca = df_filtrado.groupby('Date')['1RM_Estimada'].max().reset_index()
-        st.line_chart(data=progresso_forca, x='Date', y='1RM_Estimada')
+    df['Grupo_Muscular'] = df['exercise_title'].apply(mapear_musculo)
+    
+    # Processar Datas para encontrar as Semanas
+    df['Data'] = pd.to_datetime(df['start_time'], format='%d %b %Y, %H:%M', errors='coerce')
+    df['Semana'] = df['Data'].dt.to_period('W').apply(lambda r: r.start_time).dt.date
+    
+    # Filtro de Exercício na Sidebar
+    with st.sidebar:
+        exercicios = df['exercise_title'].dropna().unique()
+        exercicios.sort()
+        exercicio_selecionado = st.selectbox("Análise Individual:", options=exercicios)
+    
+    # 2. MÉTRICAS DE TOPO (KPIs)
+    st.subheader(f"Resumo: {exercicio_selecionado}")
+    df_ex = df[df['exercise_title'] == exercicio_selecionado].copy()
+    
+    if not df_ex.empty:
+        df_ex['Dia'] = df_ex['Data'].dt.date
+        max_1rm = df_ex['1RM_Estimada'].max()
+        max_vol = df_ex.groupby('Dia')['Volume_Serie'].sum().max()
+        treinos_totais = df_ex['Dia'].nunique()
         
-        # --- GRÁFICO 2: HIPERTROFIA (Volume) ---
-        st.subheader("Volume Total de Carga (Kg x Reps)")
-        progresso_volume = df_filtrado.groupby('Date')['Volume_Serie'].sum().reset_index()
-        st.bar_chart(data=progresso_volume, x='Date', y='Volume_Serie')
+        # Criar 3 cartões lado a lado
+        col1, col2, col3 = st.columns(3)
+        col1.metric("🏆 Recorde 1RM", f"{max_1rm:.1f} kg")
+        col2.metric("📦 Máx Volume/Sessão", f"{max_vol:.0f} kg")
+        col3.metric("📅 Treinos Registados", treinos_totais)
         
-    else:
-        st.warning("Não há dados suficientes para desenhar os gráficos deste exercício.")
+        # Gráfico Individual de Força
+        progresso_forca = df_ex.groupby('Dia')['1RM_Estimada'].max().reset_index()
+        st.line_chart(data=progresso_forca, x='Dia', y='1RM_Estimada', height=300)
+    
+    st.divider()
+    
+    # 3. VOLUME SEMANAL POR GRUPO MUSCULAR (Ouro para Hipertrofia)
+    st.subheader("Volume Semanal por Grupo Muscular")
+    volume_semanal = df.groupby(['Semana', 'Grupo_Muscular'])['Volume_Serie'].sum().reset_index()
+    
+    # Pivotar a tabela para desenhar barras empilhadas por cores
+    df_pivot = volume_semanal.pivot(index='Semana', columns='Grupo_Muscular', values='Volume_Serie').fillna(0)
+    st.bar_chart(df_pivot, height=400)
+    
 else:
-    st.info("👆 Por favor, faça o upload de um ficheiro CSV do Hevy para começar.")
+    st.info("👆 Abra a barra lateral à esquerda para carregar o ficheiro CSV.")
