@@ -3,16 +3,49 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from fpdf import FPDF
+from supabase import create_client, Client
 
 st.set_page_config(layout="wide", page_title="Dashboard B2B Pro")
 st.title("Dashboard de Desempenho Desportivo (B2B)")
 
-with st.sidebar:
-    st.header("⚙️ Configurações")
-    ficheiro_carregado = st.file_uploader("Upload CSV do Cliente", type=["csv"])
+# Ligar à Base de Dados
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(url, key)
 
-if ficheiro_carregado is not None:
-    df = pd.read_csv(ficheiro_carregado)
+with st.sidebar:
+    st.header("👥 Gestão de Clientes")
+    
+    # 1. Obter lista de clientes únicos da BD
+    resposta = supabase.table("treinos").select("cliente").execute()
+    df_bd = pd.DataFrame(resposta.data)
+    clientes_existentes = df_bd['cliente'].unique().tolist() if not df_bd.empty else []
+    
+    cliente_selecionado = st.selectbox("Selecione o Cliente:", ["Adicionar Novo Cliente..."] + clientes_existentes)
+    
+    st.divider()
+    
+    # 2. Lógica para carregar novos ficheiros para a BD
+    if cliente_selecionado == "Adicionar Novo Cliente...":
+        nome_novo = st.text_input("Nome do novo cliente:")
+        ficheiro_carregado = st.file_uploader("Upload CSV (Hevy)", type=["csv"])
+        
+        if st.button("Guardar Perfil na Base de Dados") and ficheiro_carregado and nome_novo:
+            df_novo = pd.read_csv(ficheiro_carregado)
+            # Ficar apenas com as colunas necessárias para poupar espaço
+            df_limpo = df_novo[['start_time', 'exercise_title', 'weight_kg', 'reps']].copy()
+            df_limpo['cliente'] = nome_novo
+            
+            # Enviar para o Supabase (formato dicionário)
+            supabase.table("treinos").insert(df_limpo.to_dict(orient="records")).execute()
+            st.success(f"✅ Dados de {nome_novo} guardados com sucesso! Atualize a página.")
+            st.stop()
+
+# 3. Mostrar o Dashboard se um cliente válido for selecionado
+if cliente_selecionado != "Adicionar Novo Cliente...":
+    # Ir buscar apenas os dados deste cliente à BD
+    dados_cliente = supabase.table("treinos").select("*").eq("cliente", cliente_selecionado).execute()
+    df = pd.DataFrame(dados_cliente.data)
     
     df['Data_Completa'] = pd.to_datetime(df['start_time'], format='%d %b %Y, %H:%M', errors='coerce')
     df['Data'] = df['Data_Completa'].dt.date
@@ -91,39 +124,23 @@ if ficheiro_carregado is not None:
 
     with tab3:
         st.subheader("Geração de Resumo Executivo")
-        
         vol_total = df['Volume_Serie'].sum()
         ex_monitorizados = df['exercise_title'].nunique()
         musculo_top = radar_df.loc[radar_df['Volume_Serie'].idxmax()]['Grupo_Muscular'] if not radar_df.empty else "N/A"
         
         st.write(f"**🏋️‍♂️ Volume Total Acumulado:** {vol_total:.0f} kg")
-        st.write(f"**📈 Exercícios Monitorizados:** {ex_monitorizados}")
-        st.write(f"**🔥 Músculo mais trabalhado:** {musculo_top}")
-        st.write(f"**⚖️ Índice de Segurança (ACWR):** {acwr_atual:.2f}")
         
-        # Função para gerar o PDF
         def criar_pdf():
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("helvetica", "B", 16)
-            pdf.cell(0, 10, "Relatorio de Desempenho do Cliente", new_x="LMARGIN", new_y="NEXT", align="C")
+            pdf.cell(0, 10, f"Relatorio de Desempenho - {cliente_selecionado}", new_x="LMARGIN", new_y="NEXT", align="C")
             pdf.ln(10)
             pdf.set_font("helvetica", "", 12)
             pdf.cell(0, 10, f"Volume Total Acumulado: {vol_total:.0f} kg", new_x="LMARGIN", new_y="NEXT")
             pdf.cell(0, 10, f"Exercicios Monitorizados: {ex_monitorizados}", new_x="LMARGIN", new_y="NEXT")
             pdf.cell(0, 10, f"Musculo mais trabalhado: {musculo_top}", new_x="LMARGIN", new_y="NEXT")
             pdf.cell(0, 10, f"Indice de Seguranca (ACWR): {acwr_atual:.2f}", new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(10)
-            pdf.cell(0, 10, "Gerado pelo Dashboard B2B Pro", new_x="LMARGIN", new_y="NEXT", align="C")
             return bytes(pdf.output())
 
-        # Botão de Download
-        st.download_button(
-            label="📄 Descarregar Relatório PDF",
-            data=criar_pdf(),
-            file_name="relatorio_cliente.pdf",
-            mime="application/pdf"
-        )
-
-else:
-    st.info("👆 Utilize a barra lateral para carregar o histórico de treinos do cliente.")
+        st.download_button(label="📄 Descarregar Relatório PDF", data=criar_pdf(), file_name=f"relatorio_{cliente_selecionado}.pdf", mime="application/pdf")
