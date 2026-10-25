@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-
+pandas
+numpy
+plotly
 st.set_page_config(layout="wide", page_title="Dashboard B2B Pro")
 st.title("Dashboard de Desempenho Desportivo (B2B)")
 
